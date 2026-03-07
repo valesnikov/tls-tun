@@ -4,7 +4,7 @@ Simple L3 TLS tunnel that can handle one client at a time.
 
 Client is authenticated using TLS.
 
-Client routes all IPv4 traffic to the tunnel, except the ones with fwmark `2720184` (can be changed by setting `--fwmark` flag).
+Client routes all IPv4 traffic to the tunnel, except the packets with fwmark `2720184` (can be changed by setting `--fwmark` flag).
 
 Each time session init ack is exchanged, the previous client's socket is closed by the server.
 
