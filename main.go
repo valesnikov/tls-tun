@@ -346,6 +346,7 @@ type client struct {
 	ServerCertPath string
 	Fwmark         uint32
 	Iface          *water.Interface
+	SkipIfSetup    bool
 }
 
 func (c *client) run() int {
@@ -369,19 +370,21 @@ func (c *client) run() int {
 
 	log.Printf("Connected to remote host")
 
-	err = setFwmark(rawConn, uint32(c.Fwmark))
-	if err != nil {
-		log.Printf("Failed to set fwmark: %s", err)
-		return 1
-	}
+	if !c.SkipIfSetup {
+		err = setFwmark(rawConn, uint32(c.Fwmark))
+		if err != nil {
+			log.Printf("Failed to set fwmark: %s", err)
+			return 1
+		}
 
-	fwmarkStr := strconv.FormatUint(uint64(c.Fwmark), 10)
-	if err := ipLog("rule", "add", "not", "fwmark", fwmarkStr, "table", fwmarkStr); err != nil {
-		return 1
-	}
-	defer ipLog("rule", "delete", "table", fwmarkStr)
-	if err := ipLog("route", "add", "0.0.0.0/0", "dev", c.IfaceName, "table", fwmarkStr, "table", fwmarkStr); err != nil {
-		return 1
+		fwmarkStr := strconv.FormatUint(uint64(c.Fwmark), 10)
+		if err := ipLog("rule", "add", "not", "fwmark", fwmarkStr, "table", fwmarkStr); err != nil {
+			return 1
+		}
+		defer ipLog("rule", "delete", "table", fwmarkStr)
+		if err := ipLog("route", "add", "0.0.0.0/0", "dev", c.IfaceName, "table", fwmarkStr, "table", fwmarkStr); err != nil {
+			return 1
+		}
 	}
 
 	socketClosedCh := make(chan struct{})
@@ -410,6 +413,7 @@ func usage() {
 	fmt.Fprintf(os.Stderr, "\t[--server-key <key path>] [--server-cert <cert path>]\n")
 	fmt.Fprintf(os.Stderr, "\t[--client-key <key path>] [--client-cert <cert path>]\n")
 	fmt.Fprintf(os.Stderr, "\t[--fwmark <fwmark>]\n")
+	fmt.Fprintf(os.Stderr, "\t[--skip-if-setup]\n")
 	fmt.Fprintf(os.Stderr, "To run client with TLS, specify -c, --server-cert, --client-key and --client-cert\n")
 	fmt.Fprintf(os.Stderr, "To run server with TLS, specify -s, --server-cert, --server-key, and --client-cert\n")
 }
@@ -425,6 +429,7 @@ func main() {
 	var clientCertPath string
 	var clientKeyPath string
 	var fwMark int64
+	var skipIfSetup bool
 
 	flag.StringVar(&bindAddr, "l", "", "Address to bind")
 	flag.StringVar(&remoteAddr, "c", "", "Address to connect")
@@ -434,6 +439,7 @@ func main() {
 	flag.StringVar(&clientKeyPath, "client-key", "", "Path to the client key file")
 	flag.StringVar(&clientCertPath, "client-cert", "", "Path to the client cert file")
 	flag.Int64Var(&fwMark, "fwmark", 2720184, "Firewall mark and table id (272018 by default)")
+	flag.BoolVar(&skipIfSetup, "skip-if-setup", false, "Skip interface setup (addr, route, fwmark)")
 	flag.Usage = usage
 	flag.Parse()
 
@@ -467,11 +473,13 @@ func main() {
 		log.Fatalf("Failed to create TUN: %s", err)
 	}
 
-	if err := ipLog("link", "set", "up", "dev", ifaceName); err != nil {
-		os.Exit(1)
-	}
-	if err := ipLog("address", "add", ifaceAddr, "dev", ifaceName); err != nil {
-		os.Exit(1)
+	if !skipIfSetup {
+		if err := ipLog("link", "set", "up", "dev", ifaceName); err != nil {
+			os.Exit(1)
+		}
+		if err := ipLog("address", "add", ifaceAddr, "dev", ifaceName); err != nil {
+			os.Exit(1)
+		}
 	}
 
 	if !secure && (len(serverCertPath) != 0 ||
@@ -526,6 +534,7 @@ func main() {
 			ServerCertPath: serverCertPath,
 			Fwmark:         uint32(fwMark),
 			Iface:          iface,
+			SkipIfSetup:    skipIfSetup,
 		}
 		os.Exit(c.run())
 	}
